@@ -1,0 +1,167 @@
+import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+// Главная функция
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  runApp(KindFinderApp());
+}
+
+// Основное приложение
+class KindFinderApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Kind Finder',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: AuthenticationWrapper(),
+    );
+  }
+}
+
+// Проверка авторизации пользователя
+class AuthenticationWrapper extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.hasData) {
+          return HomePage();
+        } else {
+          return SignInPage();
+        }
+      },
+    );
+  }
+}
+
+// Страница входа
+class SignInPage extends StatefulWidget {
+  @override
+  _SignInPageState createState() => _SignInPageState();
+}
+
+class _SignInPageState extends State<SignInPage> {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+
+  Future<void> signIn() async {
+    try {
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: _emailController.text.trim(), password: _passwordController.text.trim());
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  Future<void> register() async {
+    try {
+      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: _emailController.text.trim(), password: _passwordController.text.trim());
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Kind Finder: Вхід/Реєстрація')),
+      body: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          children: [
+            TextField(controller: _emailController, decoration: InputDecoration(labelText: 'Email')),
+            TextField(controller: _passwordController, decoration: InputDecoration(labelText: 'Пароль'), obscureText: true),
+            SizedBox(height: 20),
+            ElevatedButton(onPressed: signIn, child: Text('Увійти')),
+            ElevatedButton(onPressed: register, child: Text('Зареєструватись')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Главная страница с простым поиском мест
+class HomePage extends StatefulWidget {
+  @override
+  _HomePageState createState() => _HomePageState();
+}
+
+// Модель места
+class Place {
+  final String id;
+  final String name;
+  final String type;
+  Place({required this.id, required this.name, required this.type});
+
+  factory Place.fromDoc(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return Place(id: doc.id, name: data['name'], type: data['type']);
+  }
+}
+
+class _HomePageState extends State<HomePage> {
+  final _searchController = TextEditingController();
+  String _searchText = '';
+
+  Stream<List<Place>> getPlacesStream() {
+    var ref = FirebaseFirestore.instance.collection('places');
+    if (_searchText.isNotEmpty) {
+      ref = ref.where('name', isGreaterThanOrEqualTo: _searchText).where('name', isLessThanOrEqualTo: _searchText + '\uf8ff');
+    }
+    return ref.snapshots().map((query) => query.docs.map((doc) => Place.fromDoc(doc)).toList());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Kind Finder'),
+        actions: [
+          IconButton(onPressed: () => FirebaseAuth.instance.signOut(), icon: Icon(Icons.logout))
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: EdgeInsets.all(8),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(labelText: 'Пошук місць', prefixIcon: Icon(Icons.search), border: OutlineInputBorder()),
+              onChanged: (val) => setState(() => _searchText = val.trim()),
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<List<Place>>(
+              stream: getPlacesStream(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
+                final places = snapshot.data!;
+                if (places.isEmpty) return Center(child: Text('Нічого не знайдено'));
+                return ListView.builder(
+                  itemCount: places.length,
+                  itemBuilder: (context, index) {
+                    final place = places[index];
+                    return ListTile(
+                      title: Text(place.name),
+                      subtitle: Text(place.type),
+                      onTap: () {
+                        // Здесь можно открыть детали или забронировать
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
